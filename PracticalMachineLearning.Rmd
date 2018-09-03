@@ -1,0 +1,205 @@
+---
+html_document: PracticalMachineLearning.html
+author: "Le, Duc Anh"
+date: "September, 2018"
+output:
+  html_document: default
+  pdf_document: default
+keep_md: yes
+title: "Weight Lift Quality Prediction"
+subtitle: Practical Machine Learning Course Project
+abstract: This project examines different models used for predicting the quality of
+  exercises done by a group of 6 participants. Three different classification models
+  including trees, random forest, and gradient boosted models. It is found that the
+  random forest and stacked predictors would be the best approaches in qualifying
+  the activities.
+---
+#Data Processing 
+
+##Getting Data
+The [training](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv) and [testing](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv) data sets are downloaded from the respective URL.
+
+```{r}
+##Loading training set
+URL <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+filename <-"pml-training.csv"
+if (!file.exists(filename)) {
+    download.file(URL,filename,method="curl")
+}
+
+##Loading testing set
+URL <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+filename <-"pml-testing.csv"
+if (!file.exists(filename)) {
+    download.file(URL,filename,method="curl")
+}
+
+training<-read.csv("pml-training.csv")
+testing<-read.csv("pml-testing.csv")
+```
+The structure of the data collected are shown below:
+
+```{r}
+str(training)
+```
+##Cleaning Data
+A few steps are done on the data sets in order to eliminate unnecessary information.
+
+Firstly, the first 7 variables are eliminated since they only serve the purpose of identification and do not offer any prediction power:
+
+```{r}
+training<-training[,-c(1:7)]
+testing<-testing[,-c(1:7)]
+```
+
+Secondly, as noted from the structure of the, some of the varibles only contain mostly "NA" or " ", indicating that a large proportion of data is missing for these variables. As a results, these variables do not have sufficinet prediction power to be included for the modelling. 
+
+```{r}
+naMean<-colSums(is.na(training))/nrow(training)
+training<-training[,naMean<0.5]
+testing<-testing[,naMean<0.5]
+
+emptyMean<-colSums(training=="")/nrow(training)
+training<-training[,emptyMean<0.5]
+testing<-testing[,emptyMean<0.5]
+```
+
+#Model Building 
+
+The following libraries are loaded into R for this analysis:
+
+```{r, message=FALSE}
+require(caret)
+require(rattle)
+require(randomForest)
+require(gbm)
+require(rpart)
+```
+
+##Training and Cross-Validation
+
+The training data is split into training and cross-validation sets. The trainData set is used for model building and the cvData is used for out-of-sample validation and selection of the models. For this study, 80% of the training set is assigned to trainData while the remaining samples are assigned to cvData.
+
+```{r}
+set.seed(180792)
+inTrain<-createDataPartition(y=training$classe,p=0.8,list=FALSE)
+trainData<-training[inTrain,]
+cvData<-training[-inTrain,]
+```
+
+##Model Building
+
+For the purpose of this study, three primary models are constructed, including classfication tree, random forest and gradient boosted model. A fourth model is then derived as a stacked predictor based on the above-mentioned models. The accuracy of the four models are then evaluated against the cvData and the model with the best accuracy is used to evaluate the testing set (preTest).
+
+###Classification tree
+
+```{r}
+Fit_rpart<-rpart(classe~.,
+                 data=trainData)
+```
+
+The classification models are visualised as below:
+
+```{r}
+fancyRpartPlot(Fit_rpart)
+```
+
+###Random forest
+
+The resulted model created from the random forest method is shown below:
+
+```{r}
+Fit_rf<-randomForest(classe~.,
+              data=trainData,
+              verbose=FALSE)
+print(Fit_rf)
+```
+
+###Generalized Boosted Model
+
+```{r}
+Fit_gbm<-train(classe~.,
+               method="gbm",
+               data=trainData,
+               verbose=FALSE)
+print(Fit_gbm)
+```
+
+###Stacked Model
+
+```{r}
+pred_rpart <- predict(Fit_rpart,newdata = trainData,type="class")
+pred_rf <- predict(Fit_rf,newdata = trainData,type="class")
+pred_gbm <- predict(Fit_gbm,newdata = trainData,n.trees=100)
+data_stacked <- data.frame(classe=trainData$classe,
+                           pred_rpart,
+                           pred_rf,
+                           pred_gbm)
+Fit_Stacked <- randomForest(classe~.,data=data_stacked)
+print(Fit_Stacked)
+```
+
+##Model Evaluation
+
+```{r}
+test_rpart <- predict(Fit_rpart, newdata = cvData,type="class")
+test_rf <- predict(Fit_rf, newdata = cvData,type="class")
+test_gbm <- predict(Fit_gbm, newdata = cvData)
+test_stacked <- data.frame(classe=cvData$classe,
+                           test_rpart,
+                           test_rf,
+                           test_gbm)
+names(test_stacked)<-names(data_stacked)
+test_stacked <- predict(Fit_Stacked, newdata = test_stacked,type="class")
+```
+
+```{r}
+confusionMatrix(test_rpart,cvData$classe)
+```
+
+```{r}
+confusionMatrix(test_rf,cvData$classe)
+```
+
+```{r} 
+confusionMatrix(test_gbm,cvData$classe)
+```
+
+```{r}
+confusionMatrix(test_stacked,cvData$classe)
+```
+
+
+From the confusion matrix, the random forest and stacked predictor methods provide the best model for the validation set prediction with accuracy of 0.9952 and 0.9949 respectively. Hence these two models are used for predicting the testing data set.
+
+##Testing Data Prediction
+
+###Prediction using random forest model
+
+```{r}
+testing_rf<-predict(Fit_rf, newdata = testing) 
+```
+
+###Prediction using stacked predictor
+```{r}
+final_rpart <- predict(Fit_rpart, newdata = testing,type="class")
+final_rf <- predict(Fit_rf, newdata = testing,type="class")
+final_gbm <- predict(Fit_gbm, newdata = testing)
+final_stacked <- data.frame(final_rpart,
+                           final_rf,
+                           final_gbm)
+names(final_stacked)<-names(data_stacked[,-1])
+testing_stacked<-predict(Fit_Stacked, newdata = final_stacked,type="class")
+```
+
+###Prediction results
+
+```{r}
+Test_Result<-data.frame(ID=1:20,
+                        RandomForest = testing_rf, 
+                        Stacked = testing_stacked,
+                        Matched = testing_rf == testing_stacked)
+print(Test_Result)
+```
+
+The two models seem to provide matched results on the prediction. We could hence use this result as the final prediction on the testing data.
